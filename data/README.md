@@ -1,4 +1,9 @@
 # Data
-This folder will contain all datasets named based on the following rule:
 
-`/data/<dataset_name>/` -> (snake_case)
+This folder serves as the storage location for datasets used in the project.
+
+## Naming Convention
+Datasets should be organized in subdirectories using snake_case naming:
+`/data/<dataset_name>/`
+
+**Note**: Actual data files are typically ignored by version control. Ensure you download or place your datasets here before running training scripts.
