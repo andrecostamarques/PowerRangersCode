@@ -1,3 +1,11 @@
+"""
+Training loop execute the training for the Config object specified.
+It recieves the Config object and instantiate the trainer.
+
+It main focus in only to setup the configuration of the training and to instantiate and call the correct methods.
+"""
+# Importing section 
+
 import sys
 import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../utils')))
@@ -13,6 +21,7 @@ from StaticMaskTraining import StaticMaskTraining
 
 from TrainingConfig import TrainingConfig
 from LambdaScheduler import LambdaScheduler
+from DatasetsDict import DatasetDict
 from TotalLoss import TotalLoss
 
 from LeNet5 import LeNet5
@@ -20,18 +29,19 @@ import SelectionMask as sm
 
 
 def main():
-    mnist_transform = transforms.Compose([ 
-        transforms.ToTensor(),
-        transforms.Normalize((0.1307,), (0.3081,)),
-    ])
+    """
+    Main execution function for the training script.
 
-    mnist_datasets = [
-        datasets.MNIST(root='../../data/', train=True, download=True, transform=mnist_transform),
-        datasets.MNIST(root='../../data/', train=False, download=True, transform=mnist_transform)
-    ]
+    Initializes the dataset, defines the configuration dictionary for the
+    experiment, and starts the training process using the StaticMaskTraining class.
+    """
+    # Instantiating the DatasetDict
+    db = DatasetDict()
+
+    ds_list, tf_train, tf_test = db.get("mnist")
 
     mnist_raw_config = { 
-        # Parâmetros de Modelo/Treinamento
+        # Parameters for training
         "model": LeNet5(), 
         "n_epochs": 400, 
         "batch_size": 128, 
@@ -39,34 +49,34 @@ def main():
         "model_learning_rate": 0.001, 
         "mask_learning_rate": 0.005, 
         
-        # Parâmetros do Lambda Scheduler
+        # Params for the lambda scheduler
         "lambda_init": 0.0005, 
         "lambda_factor": 1.5, 
         "lambda_patience": 5,
         "lambda_treshold": 0.2, 
         
-        # Parâmetros de Identificação e Classes
-        "training_id": "lenet_mnist_01",
+        # Params for the class identification
+        "training_id": "lenet_mnist_02",
         "optimizer_class": optim.AdamW,
-        "model_loss_function": nn.NLLLoss, # Loss compatível com LogSoftmax
-        "mask_model": sm.SelectionMask, # Sua classe de máscara
-        "mask_loss_function": sm.mask_l1_loss, # Sua função de perda de esparsidade
+        "model_loss_function": nn.NLLLoss, # Correct loss for the LeNet5()
+        "mask_model": sm.SelectionMask, # Our static Mask
+        "mask_loss_function": sm.mask_l1_loss, # Our static Mask loss
         
-        # Parâmetros de Dados (Exigidos pela sua TrainingConfig)
-        "datasets": mnist_datasets, 
-        "transform_train": mnist_transform, 
-        "transform_test": mnist_transform,
-        "eval_split": 0.1, # 10% do dataset de treino será usado para validação
+        # Params for the dataset
+        "datasets": ds_list, 
+        "transform_train": tf_train, 
+        "transform_test": tf_test,
+        "eval_split": 0.1, # 10% of the dataset for validation
         "seed": 42,
 
-        # Testando enviar em outra pasta
-        #"root_dir_save": "./teste/"
+        # Testing sending to another folder
+        #"root_dir_save": "./test/"
     }
 
+    # Instantiating the config file and the trainer
     config = TrainingConfig(**mnist_raw_config)
     trainer = StaticMaskTraining(config)
     trainer.train()
 
 if __name__ == "__main__":
     main()
-
