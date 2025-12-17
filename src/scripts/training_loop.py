@@ -25,6 +25,7 @@ from DatasetsDict import DatasetDict
 from TotalLoss import TotalLoss
 
 from LeNet5 import LeNet5
+from ResNet20 import resnet20
 import SelectionMask as sm
 
 
@@ -38,27 +39,27 @@ def main():
     # Instantiating the DatasetDict
     db = DatasetDict()
 
-    ds_list, tf_train, tf_test = db.get("mnist")
+    ds_list, tf_train, tf_test = db.get("galaxy10")
 
     mnist_raw_config = { 
         # Parameters for training
-        "model": LeNet5(), 
-        "n_epochs": 400, 
-        "batch_size": 128, 
-        "mask_shape": (1, 28, 28), 
-        "model_learning_rate": 0.001, 
-        "mask_learning_rate": 0.005, 
+        "model": resnet20(), 
+        "n_epochs": 300, 
+        "batch_size": 32, 
+        "mask_shape": (3,256, 256), 
+        "model_learning_rate": 1e-4, 
+        "mask_learning_rate": 0.001, 
         
         # Params for the lambda scheduler
-        "lambda_init": 0.0005, 
+        "lambda_init": 1, 
         "lambda_factor": 1.5, 
-        "lambda_patience": 5,
-        "lambda_treshold": 0.2, 
+        "lambda_patience": 2,
+        "lambda_treshold": 0.0025, 
         
         # Params for the class identification
-        "training_id": "lenet_mnist_02",
+        "training_id": "galaxy10_resnet_final",
         "optimizer_class": optim.AdamW,
-        "model_loss_function": nn.NLLLoss, # Correct loss for the LeNet5()
+        "model_loss_function": nn.CrossEntropyLoss, # Correct loss for the LeNet5()
         "mask_model": sm.SelectionMask, # Our static Mask
         "mask_loss_function": sm.mask_l1_loss, # Our static Mask loss
         

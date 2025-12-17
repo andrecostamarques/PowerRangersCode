@@ -8,6 +8,8 @@ and testing.
 
 import torch
 from torchvision import datasets, transforms
+from CustomDatasets import Galaxy10HFDataset
+
 
 class DatasetDict:
     """
@@ -130,6 +132,34 @@ class DatasetDict:
             datasets.SVHN(root=f'{self.data_root}svhn', split='test', download=True, transform=svhn_tf_test)
         ]
         self.datasets['svhn'] = (svhn_ds, svhn_tf_train, svhn_tf_test)
+
+        # =========================================================================
+        # 5. Galaxy10
+        # =========================================================================
+
+        galaxy10_mean = (0.170, 0.142, 0.121)
+        galaxy10_std  = (0.248, 0.210, 0.190)
+
+        galaxy10_tf_train = transforms.Compose([
+            transforms.RandomCrop(256, padding=32),
+            transforms.RandomHorizontalFlip(),
+            transforms.RandomVerticalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize(galaxy10_mean, galaxy10_std),
+        ])
+
+        galaxy10_tf_test = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize(galaxy10_mean, galaxy10_std),
+        ])
+
+        # Seguindo o seu padrão de retornar [train_ds, test_ds]
+        galaxy10_ds = [
+            Galaxy10HFDataset(root=f'{self.data_root}galaxy10', split='train', download=True, transform=galaxy10_tf_train),
+            Galaxy10HFDataset(root=f'{self.data_root}galaxy10', split='test', download=True, transform=galaxy10_tf_test)
+        ]
+        
+        self.datasets['galaxy10'] = (galaxy10_ds, galaxy10_tf_train, galaxy10_tf_test)
 
     def get(self, name):
         """
