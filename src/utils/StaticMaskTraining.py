@@ -221,6 +221,13 @@ class StaticMaskTraining:
             'cm': cm,
             'lambda': self.lambda_scheduler.lbd
         }
+
+        if epoch == 0:
+        # Add the model and mask object to the first epoch to later be able to test the model more easily
+            checkpoint['model_obj'] = self.model
+            checkpoint['mask_model_obj'] = self.mask_model
+            print(f">>> Epoch 1: Saving the Mask Model and Model for future testing.")
+
         torch.save(checkpoint, f'{self.checkpoint_dir}/checkpoint_epoch_{epoch + 1}.pt')
 
     def log_training(self, epoch, avg_model_loss, avg_mask_loss, avg_total_loss, accuracy):
