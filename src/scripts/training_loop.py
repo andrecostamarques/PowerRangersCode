@@ -73,9 +73,9 @@ def main():
         #"root_dir_save": "./test/"
     }
 
-    # Instantiating the config file and the trainer
-    config = TrainingConfig(**mnist_raw_config)
-    trainer = StaticMaskTraining(config)
+    # Instantiating the config file and the trainers
+    config = TrainingConfig(**mnist_raw_config)   
+    trainer = StaticMaskTraining(config) 
     trainer.train()
 
 if __name__ == "__main__":
