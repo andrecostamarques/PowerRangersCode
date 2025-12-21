@@ -45,7 +45,7 @@ def main():
         # Parameters for training
         "model": resnet20(), 
         "n_epochs": 300, 
-        "batch_size": 32, 
+        "batch_size": 64, 
         "mask_shape": (3,256, 256), 
         "model_learning_rate": 1e-4, 
         "mask_learning_rate": 0.001, 
