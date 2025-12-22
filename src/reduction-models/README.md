@@ -39,7 +39,7 @@ By using the **String Data** as the sole source of information, we aim to valida
 
 This plethora of methods serves to experiment with and validate the central hypothesis:
 
-> **Can we use a static mask to reduce data dimensionality and, consequently, reduce the complexity of the classifier?**
+**Can we use a static mask to reduce data dimensionality and, consequently, reduce the complexity of the classifier?**
 
 ---
 
