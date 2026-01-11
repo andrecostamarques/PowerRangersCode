@@ -10,66 +10,104 @@ import os
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
-import seaborn as sns # Adicionado para o plot_checkpoint_stats
+import seaborn as sns # Added for plot_checkpoint_stats
 from matplotlib.animation import FuncAnimation
 from IPython.display import HTML
 import pandas as pd
 
 class NotebookUtils():
+    """
+    Utility class for Jupyter Notebook operations.
+
+    This class provides methods to visualize training progress, load checkpoints,
+    and analyze training logs within a notebook environment.
+    """
     def __init__(self):
+        """Initializes the NotebookUtils instance."""
         pass
     
-    def animate_notebook(self, frames, interval, cmap='viridis', figsize=(8, 6), 
-                        colorbar=True, title_prefix='Frame', vmin=0, vmax=1):
+    def animate_notebook(self, frames, ratio, interval=50, cmap='viridis', figsize=(8, 6), 
+                     colorbar=True, title_prefix='Frame', vmin=0, vmax=1):
         """
-        Gera uma animação HTML para o Jupyter. 
-        Suporta máscaras 2D (Grayscale) e 3D (RGB - Canais, Altura, Largura).
-        """
-        fig, ax = plt.subplots(figsize=figsize)
-        
-        # Função interna para tratar o formato do Tensor/Numpy
-        def prepare_frame(f):
-            # Se for (C, H, W), converte para (H, W, C) para o Matplotlib
-            if f.ndim == 3:
-                if f.shape[0] in [1, 3]: # Se os canais estiverem na frente
-                    f = np.transpose(f, (1, 2, 0))
-                # Se for 1 canal após o transpose, remove a dimensão extra
-                if f.shape[-1] == 1:
-                    f = f.squeeze(-1)
-            return f
+        Creates an HTML animation from a list of frames.
 
-        first_frame = prepare_frame(frames[0])
+        Args:
+            frames (list): A list of frames (numpy arrays) to animate.
+            ratio (int): The ratio of frames to epochs (e.g., if frames are saved every 10 epochs).
+            interval (int, optional): Delay between frames in milliseconds. Defaults to 50.
+            cmap (str, optional): Colormap for the image. Defaults to 'viridis'.
+            figsize (tuple, optional): Figure size (width, height). Defaults to (8, 6).
+            colorbar (bool, optional): Whether to display a colorbar. Defaults to True.
+            title_prefix (str, optional): Prefix for the title of each frame. Defaults to 'Frame'.
+            vmin (float, optional): Minimum value for colormap scaling. Defaults to 0.
+            vmax (float, optional): Maximum value for colormap scaling. Defaults to 1.
+
+        Returns:
+            IPython.display.HTML: An HTML object containing the Javascript animation.
+        """
         
-        # Detecta se é RGB para desativar colorbar e vmin/vmax (que causariam erro)
-        is_rgb = (first_frame.ndim == 3 and first_frame.shape[-1] == 3)
+        first_frame = np.array(frames[0])
+        is_multichannel = first_frame.ndim == 3
+        num_channels = first_frame.shape[0] if is_multichannel else 1
+
+        # Adjust figure size to accommodate subplots
+        if is_multichannel:
+            fig_width, fig_height = figsize
+            figsize = (fig_width * num_channels, fig_height)
+
+        # Configure figure and subplots
+        fig, axes = plt.subplots(1, num_channels, figsize=figsize, squeeze=False)
+        axes = axes.flatten() # Ensure axes is always an iterable array
         
-        im = ax.imshow(first_frame, 
-                       cmap=None if is_rgb else cmap, 
-                       animated=True, 
-                       vmin=None if is_rgb else vmin, 
-                       vmax=None if is_rgb else vmax, 
-                       origin='lower')
+        # Plot the first frame in each subplot
+        images = []
+        for i in range(num_channels):
+            ax = axes[i]
+            frame_data = first_frame[i] if is_multichannel else first_frame
+            im = ax.imshow(np.round(1 / (1 + np.exp(-frame_data))), cmap=cmap, animated=True, 
+                        vmin=vmin, vmax=vmax, origin='lower')
+            images.append(im)
+            
+            if colorbar:
+                fig.colorbar(im, ax=ax)
+            
+            ax.grid(False)
+            title = f'Channel {i} - {title_prefix} 0' if is_multichannel else f'{title_prefix} 0'
+            ax.set_title(title)
         
-        if colorbar and not is_rgb:
-            plt.colorbar(im, ax=ax)
-        
-        ax.grid(False)
-        ax.set_title(f'{title_prefix} 0')
-        
+        # Update function
         def update(frame_idx):
-            current_frame = prepare_frame(frames[frame_idx])
-            im.set_array(current_frame)
-            ax.set_title(f'{title_prefix} {frame_idx}')
-            return [im]
+            current_frames = np.array(frames[frame_idx])
+            for i in range(num_channels):
+                frame_data = current_frames[i] if is_multichannel else current_frames
+                images[i].set_array(frame_data)
+                title = f'Channel {i} - {title_prefix} {frame_idx * ratio}' if is_multichannel else f'{title_prefix} {frame_idx * ratio}'
+                axes[i].set_title(title)
+            return images
         
+        # Create animation
         ani = FuncAnimation(fig, update, frames=len(frames), 
-                            interval=interval, blit=True, repeat=True)
+                        interval=interval, blit=True, repeat=False)
         
-        plt.close(fig)
+        plt.close(fig)  # Avoid plotting the static figure
+        
+        # Return HTML
         return HTML(ani.to_jshtml())
 
 
     def load_checkpoint(self, global_checkpoint_id, epoch, root_dir="../../checkpoints/"):
+        """
+        Loads a specific checkpoint file.
+
+        Args:
+            global_checkpoint_id (str): The unique identifier for the training run.
+            epoch (int): The epoch number of the checkpoint to load.
+            root_dir (str, optional): The root directory where checkpoints are stored. 
+                Defaults to "../../checkpoints/".
+
+        Returns:
+            dict or None: The loaded state dictionary if successful, else None.
+        """
         checkpoint_path = os.path.abspath(os.path.join(
             root_dir, 
             global_checkpoint_id, 
@@ -92,17 +130,44 @@ class NotebookUtils():
             return None
 
     def load_training_log(self, global_checkpoint_id, root_dir="../../checkpoints/"):
+        """
+        Loads the training log CSV file into a pandas DataFrame.
+
+        Args:
+            global_checkpoint_id (str): The unique identifier for the training run.
+            root_dir (str, optional): The root directory where checkpoints are stored. 
+                Defaults to "../../checkpoints/".
+
+        Returns:
+            pandas.DataFrame or None: The training log data if found, else None.
+        """
         csv_path = os.path.abspath(os.path.join(root_dir, global_checkpoint_id, "training_log.csv"))
         if not os.path.exists(csv_path):
-            print(f"❌ Erro: Log não encontrado em: {csv_path}")
+            print(f"❌ Error: Log not found at: {csv_path}")
             return None
         try:
             return pd.read_csv(csv_path)
         except Exception as e:
-            print(f"❌ Erro ao ler CSV: {e}")
+            print(f"❌ Error reading CSV: {e}")
             return None
 
     def add_metrics_df(self, df, global_checkpoint_id, root_dir="../../checkpoints/"):
+        """
+        Calculates and adds validation metrics (Precision, Recall, F1-Score) to the dataframe.
+
+        Iterates through checkpoints corresponding to the epochs in the dataframe,
+        loads the confusion matrix, and computes the metrics.
+
+        Args:
+            df (pandas.DataFrame): The dataframe containing training logs.
+            global_checkpoint_id (str): The unique identifier for the training run.
+            root_dir (str, optional): The root directory where checkpoints are stored. 
+                Defaults to "../../checkpoints/".
+
+        Returns:
+            pandas.DataFrame: The dataframe enriched with 'val_precision', 'val_recall', 
+            and 'val_f1_score' columns.
+        """
         precisions, recalls, f1_scores = [], [], []
         eps = 1e-9
 
@@ -131,8 +196,22 @@ class NotebookUtils():
         df['val_f1_score'] = f1_scores
         return df
 
-    # ADICIONADA: A função plot_mask que terminamos agora
     def plot_mask(self, var_global_checkpoint, epoch, figsize=(15, 5), cmap='gray'):
+        """
+        Visualizes the mask for a specific epoch.
+
+        Loads the checkpoint, extracts the mask, applies sigmoid and rounding,
+        and plots it. Handles multi-channel masks.
+
+        Args:
+            var_global_checkpoint (str): The unique identifier for the training run.
+            epoch (int): The epoch number to visualize.
+            figsize (tuple, optional): Size of the figure. Defaults to (15, 5).
+            cmap (str, optional): Colormap for the plot. Defaults to 'gray'.
+
+        Returns:
+            matplotlib.figure.Figure or None: The figure object if successful, else None.
+        """
         ckpt = self.load_checkpoint(var_global_checkpoint, epoch)
         if ckpt is None or 'mask_state_dict' not in ckpt:
             print(f"❌ Mask not found for epoch {epoch}.")
@@ -160,4 +239,3 @@ class NotebookUtils():
 
         plt.tight_layout()
         plt.show()
-        return fig

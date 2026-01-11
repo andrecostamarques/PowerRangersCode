@@ -70,8 +70,8 @@ SETTINGS = {
     "optimizer_kwargs": {"lr": 1e-4},
     
     # Máscara Blindada
-    "mask_checkpoint_id": "galaxy10_resnet_final",
-    "mask_epoch": 190,
+    "mask_checkpoint_id": "galaxy10_resnet34_test",
+    "mask_epoch": 160,
     "root_checkpoints": os.path.join(root_path, "checkpoints"),
     "save_dir": os.path.join(root_path, "checkpoints", "reduction_training_01")
 }
