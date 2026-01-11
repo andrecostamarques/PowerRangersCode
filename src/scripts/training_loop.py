@@ -27,6 +27,7 @@ from TotalLoss import TotalLoss
 from LeNet5 import LeNet5
 from ResNet20 import resnet20
 import SelectionMask as sm
+from torchvision.models import resnet34, ResNet34_Weights
 
 
 def main():
@@ -41,9 +42,13 @@ def main():
 
     ds_list, tf_train, tf_test = db.get("galaxy10")
 
+    model_r34 = resnet34(weights=ResNet34_Weights.DEFAULT)
+    num_ftrs = model_r34.fc.in_features
+    model_r34.fc = nn.Linear(num_ftrs, 10)
+
     mnist_raw_config = { 
         # Parameters for training
-        "model": resnet20(), 
+        "model": model_r34, 
         "n_epochs": 300, 
         "batch_size": 64, 
         "mask_shape": (3,256, 256), 
@@ -57,7 +62,7 @@ def main():
         "lambda_treshold": 0.0025, 
         
         # Params for the class identification
-        "training_id": "galaxy10_resnet_final",
+        "training_id": "galaxy10_resnet34_test",
         "optimizer_class": optim.AdamW,
         "model_loss_function": nn.CrossEntropyLoss, # Correct loss for the LeNet5()
         "mask_model": sm.SelectionMask, # Our static Mask
