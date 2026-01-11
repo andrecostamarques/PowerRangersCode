@@ -10,25 +10,32 @@ import os
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
+import seaborn as sns # Added for plot_checkpoint_stats
 from matplotlib.animation import FuncAnimation
 from IPython.display import HTML
+import pandas as pd
 
 class NotebookUtils():
+    """
+    Utility class for Jupyter Notebook operations.
+
+    This class provides methods to visualize training progress, load checkpoints,
+    and analyze training logs within a notebook environment.
+    """
     def __init__(self):
+        """Initializes the NotebookUtils instance."""
         pass
     
-    def animate_notebook(frames, interval=50, cmap='viridis', figsize=(8, 6), 
-                        colorbar=True, title_prefix='Frame', vmin=0, vmax=1):
+    def animate_notebook(self, frames, ratio, interval=50, cmap='viridis', figsize=(8, 6), 
+                     colorbar=True, title_prefix='Frame', vmin=0, vmax=1):
         """
-        Creates an HTML animation from a sequence of 2D frames.
-
-        Useful for visualizing the evolution of masks or weights over epochs within
-        a Jupyter Notebook environment.
+        Creates an HTML animation from a list of frames.
 
         Args:
-            frames (list of numpy.ndarray): A list of 2D arrays representing the frames.
+            frames (list): A list of frames (numpy arrays) to animate.
+            ratio (int): The ratio of frames to epochs (e.g., if frames are saved every 10 epochs).
             interval (int, optional): Delay between frames in milliseconds. Defaults to 50.
-            cmap (str, optional): Matplotlib colormap name. Defaults to 'viridis'.
+            cmap (str, optional): Colormap for the image. Defaults to 'viridis'.
             figsize (tuple, optional): Figure size (width, height). Defaults to (8, 6).
             colorbar (bool, optional): Whether to display a colorbar. Defaults to True.
             title_prefix (str, optional): Prefix for the title of each frame. Defaults to 'Frame'.
@@ -36,129 +43,199 @@ class NotebookUtils():
             vmax (float, optional): Maximum value for colormap scaling. Defaults to 1.
 
         Returns:
-            IPython.display.HTML: An HTML object containing the Javascript-based animation.
+            IPython.display.HTML: An HTML object containing the Javascript animation.
         """
         
-        # Configurar figura
-        fig, ax = plt.subplots(figsize=figsize)
+        first_frame = np.array(frames[0])
+        is_multichannel = first_frame.ndim == 3
+        num_channels = first_frame.shape[0] if is_multichannel else 1
+
+        # Adjust figure size to accommodate subplots
+        if is_multichannel:
+            fig_width, fig_height = figsize
+            figsize = (fig_width * num_channels, fig_height)
+
+        # Configure figure and subplots
+        fig, axes = plt.subplots(1, num_channels, figsize=figsize, squeeze=False)
+        axes = axes.flatten() # Ensure axes is always an iterable array
         
-        # Plotar primeiro frame
-        im = ax.imshow(frames[0], cmap=cmap, animated=True, 
-                    vmin=vmin, vmax=vmax, origin='lower')
+        # Plot the first frame in each subplot
+        images = []
+        for i in range(num_channels):
+            ax = axes[i]
+            frame_data = first_frame[i] if is_multichannel else first_frame
+            im = ax.imshow(np.round(1 / (1 + np.exp(-frame_data))), cmap=cmap, animated=True, 
+                        vmin=vmin, vmax=vmax, origin='lower')
+            images.append(im)
+            
+            if colorbar:
+                fig.colorbar(im, ax=ax)
+            
+            ax.grid(False)
+            title = f'Channel {i} - {title_prefix} 0' if is_multichannel else f'{title_prefix} 0'
+            ax.set_title(title)
         
-        if colorbar:
-            plt.colorbar(im, ax=ax)
-        
-        ax.grid(False)
-        ax.set_title(f'{title_prefix} 0')
-        
-        # Função de atualização
+        # Update function
         def update(frame_idx):
-            im.set_array(frames[frame_idx])
-            ax.set_title(f'{title_prefix} {frame_idx}')
-            return [im]
+            current_frames = np.array(frames[frame_idx])
+            for i in range(num_channels):
+                frame_data = current_frames[i] if is_multichannel else current_frames
+                images[i].set_array(frame_data)
+                title = f'Channel {i} - {title_prefix} {frame_idx * ratio}' if is_multichannel else f'{title_prefix} {frame_idx * ratio}'
+                axes[i].set_title(title)
+            return images
         
-        # Criar animação
+        # Create animation
         ani = FuncAnimation(fig, update, frames=len(frames), 
-                        interval=interval, blit=True, repeat=True)
+                        interval=interval, blit=True, repeat=False)
         
-        plt.close(fig)  # Evita plotar a figura estática
+        plt.close(fig)  # Avoid plotting the static figure
         
-        # Retornar HTML
+        # Return HTML
         return HTML(ani.to_jshtml())
 
-    def load_checkpoints(training_id):
-        """
-        Iteratively loads training checkpoints for a given experiment ID.
 
-        This generator searches for checkpoint files following the pattern
-        'checkpoint_epoch_{i}.pt' in the standard checkpoint directory structure
-        and yields their state dictionaries.
+    def load_checkpoint(self, global_checkpoint_id, epoch, root_dir="../../checkpoints/"):
+        """
+        Loads a specific checkpoint file.
 
         Args:
-            training_id (str): The unique identifier of the training session (folder name).
+            global_checkpoint_id (str): The unique identifier for the training run.
+            epoch (int): The epoch number of the checkpoint to load.
+            root_dir (str, optional): The root directory where checkpoints are stored. 
+                Defaults to "../../checkpoints/".
 
-        Yields:
-            dict: The state dictionary loaded from the checkpoint file.
+        Returns:
+            dict or None: The loaded state dictionary if successful, else None.
         """
-        i = 0
-        while True:
-            i += 1
-            # Assumindo que você está em 'src/scripts' e os checkpoints estão em '../../checkpoints/'
-            checkpoint_path = os.path.abspath(os.path.join(
-                os.getcwd(), '..', '..', 'checkpoints', training_id, f'checkpoint_epoch_{i}.pt'
-            ))
+        checkpoint_path = os.path.abspath(os.path.join(
+            root_dir, 
+            global_checkpoint_id, 
+            f'checkpoint_epoch_{epoch}.pt'
+        ))
+        
+        if not os.path.exists(checkpoint_path):
+            print(f"ERROR: File not found at: {checkpoint_path}")
+            return None
             
-            if not os.path.exists(checkpoint_path):
-                if i == 1:
-                    print(f"Nenhum checkpoint encontrado para o ID '{training_id}'. Verifique o caminho.")
-                break
-                
-            try:
-                # CORREÇÃO ESSENCIAL: Permite carregar dados do NumPy e evitar o UnpicklingError
-                state_dict = torch.load(
-                    checkpoint_path, 
-                    map_location='cpu',
-                    weights_only=False 
-                )
-                yield state_dict
-                
-            except Exception as e:
-                print(f"Erro ao carregar o checkpoint da época {i} em {checkpoint_path}: {e}")
-                break
-
-
-    def plot_checkpoint_stats(training_id, epoch_idx):
-        # 1. Tentar carregar o checkpoint específico
-        # (Ajuste o caminho conforme sua estrutura: ../../checkpoints/ID/...)
-        path = f"../../checkpoints/{training_id}/checkpoint_epoch_{epoch_idx}.pt"
-        
         try:
-            check = torch.load(path, map_location='cpu', weights_only=False)
-        except FileNotFoundError:
-            print(f"❌ Erro: Checkpoint da época {epoch_idx} não encontrado em: {path}")
-            return
+            state_dict = torch.load(
+                checkpoint_path, 
+                map_location='cpu',
+                weights_only=False 
+            )
+            return state_dict
+        except Exception as e:
+            print(f"Error loading checkpoint at {checkpoint_path}: {e}")
+            return None
 
-        cm = np.array(check['cm'])
-        
-        # --- CÁLCULO DAS MÉTRICAS ---
-        tp = np.diag(cm)
-        fp = np.sum(cm, axis=0) - tp
-        fn = np.sum(cm, axis=1) - tp
+    def load_training_log(self, global_checkpoint_id, root_dir="../../checkpoints/"):
+        """
+        Loads the training log CSV file into a pandas DataFrame.
+
+        Args:
+            global_checkpoint_id (str): The unique identifier for the training run.
+            root_dir (str, optional): The root directory where checkpoints are stored. 
+                Defaults to "../../checkpoints/".
+
+        Returns:
+            pandas.DataFrame or None: The training log data if found, else None.
+        """
+        csv_path = os.path.abspath(os.path.join(root_dir, global_checkpoint_id, "training_log.csv"))
+        if not os.path.exists(csv_path):
+            print(f"❌ Error: Log not found at: {csv_path}")
+            return None
+        try:
+            return pd.read_csv(csv_path)
+        except Exception as e:
+            print(f"❌ Error reading CSV: {e}")
+            return None
+
+    def add_metrics_df(self, df, global_checkpoint_id, root_dir="../../checkpoints/"):
+        """
+        Calculates and adds validation metrics (Precision, Recall, F1-Score) to the dataframe.
+
+        Iterates through checkpoints corresponding to the epochs in the dataframe,
+        loads the confusion matrix, and computes the metrics.
+
+        Args:
+            df (pandas.DataFrame): The dataframe containing training logs.
+            global_checkpoint_id (str): The unique identifier for the training run.
+            root_dir (str, optional): The root directory where checkpoints are stored. 
+                Defaults to "../../checkpoints/".
+
+        Returns:
+            pandas.DataFrame: The dataframe enriched with 'val_precision', 'val_recall', 
+            and 'val_f1_score' columns.
+        """
+        precisions, recalls, f1_scores = [], [], []
         eps = 1e-9
+
+        for i in range(1, len(df) + 1):
+            ckpt = self.load_checkpoint(global_checkpoint_id, i, root_dir)
+            if ckpt is not None and 'cm' in ckpt:
+                cm = np.array(ckpt['cm'])
+                tp = np.diag(cm)
+                fp = np.sum(cm, axis=0) - tp
+                fn = np.sum(cm, axis=1) - tp
+                
+                p = tp / (tp + fp + eps)
+                r = tp / (tp + fn + eps)
+                f1 = 2 * (p * r) / (p + r + eps)
+                
+                precisions.append(np.mean(p) * 100)
+                recalls.append(np.mean(r) * 100)
+                f1_scores.append(np.mean(f1) * 100)
+            else:
+                precisions.append(np.nan)
+                recalls.append(np.nan)
+                f1_scores.append(np.nan)
+
+        df['val_precision'] = precisions
+        df['val_recall'] = recalls
+        df['val_f1_score'] = f1_scores
+        return df
+
+    def plot_mask(self, var_global_checkpoint, epoch, figsize=(15, 5), cmap='gray'):
+        """
+        Visualizes the mask for a specific epoch.
+
+        Loads the checkpoint, extracts the mask, applies sigmoid and rounding,
+        and plots it. Handles multi-channel masks.
+
+        Args:
+            var_global_checkpoint (str): The unique identifier for the training run.
+            epoch (int): The epoch number to visualize.
+            figsize (tuple, optional): Size of the figure. Defaults to (15, 5).
+            cmap (str, optional): Colormap for the plot. Defaults to 'gray'.
+
+        Returns:
+            matplotlib.figure.Figure or None: The figure object if successful, else None.
+        """
+        ckpt = self.load_checkpoint(var_global_checkpoint, epoch)
+        if ckpt is None or 'mask_state_dict' not in ckpt:
+            print(f"❌ Mask not found for epoch {epoch}.")
+            return None
+
+        mask_dict = ckpt['mask_state_dict']
+        m = mask_dict['mask'].squeeze().cpu().detach()
+        processed_mask = torch.round(torch.sigmoid(m)).numpy()
         
-        acc = np.sum(tp) / np.sum(cm)
-        prec = np.mean(tp / (tp + fp + eps))
-        rec = np.mean(tp / (tp + fn + eps))
-        f1 = 2 * (prec * rec) / (prec + rec + eps)
+        is_multichannel = processed_mask.ndim == 3
+        num_channels = processed_mask.shape[0] if is_multichannel else 1
         
-        metrics_names = ['Accuracy', 'Precision', 'Recall', 'F1-Score']
-        metrics_values = [acc * 100, prec * 100, rec * 100, f1 * 100]
-
-        # --- PLOTAGEM ---
-        fig, axes = plt.subplots(1, 2, figsize=(16, 6), gridspec_kw={'width_ratios': [1.2, 1]})
-        fig.suptitle(f"Inspeção Detalhada - Época {epoch_idx} ({training_id})", fontsize=16, fontweight='bold')
-
-        # Painel 1: Heatmap da Matriz de Confusão
-        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=axes[0], cbar=False)
-        axes[0].set_title("Matriz de Confusão", fontweight='bold')
-        axes[0].set_xlabel("Predição")
-        axes[0].set_ylabel("Real")
-
-        # Painel 2: Histograma (Barra) de Métricas
-        colors = ['#2ecc71', '#f1c40f', '#e67e22', '#9b59b6']
-        bars = axes[1].bar(metrics_names, metrics_values, color=colors, alpha=0.8, edgecolor='black')
+        fig, axes = plt.subplots(1, num_channels, figsize=figsize, squeeze=False)
+        axes = axes.flatten()
         
-        # Adiciona os valores no topo das barras
-        for bar in bars:
-            height = bar.get_height()
-            axes[1].text(bar.get_x() + bar.get_width()/2., height + 1,
-                        f'{height:.2f}%', ha='center', va='bottom', fontweight='bold')
+        for i in range(num_channels):
+            ax = axes[i]
+            img_data = processed_mask[i] if is_multichannel else processed_mask
+            im = ax.imshow(img_data, cmap=cmap, vmin=0, vmax=1, origin='lower')
+            title = f'Channel {i} - Epoch {epoch}' if is_multichannel else f'Mask - Epoch {epoch}'
+            ax.set_title(title, fontweight='bold')
+            ax.axis('off')
+            if num_channels == 1:
+                plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
 
-        axes[1].set_title("Métricas Globais (Macro)", fontweight='bold')
-        axes[1].set_ylim(0, 115) # Espaço extra para o texto acima da barra
-        axes[1].set_ylabel("Porcentagem (%)")
-        axes[1].grid(axis='y', linestyle='--', alpha=0.6)
-
-        plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+        plt.tight_layout()
         plt.show()
