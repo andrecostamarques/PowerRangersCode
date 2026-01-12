@@ -20,6 +20,7 @@ import NotebookUtils as nu
 import DatasetsDict as dd
 
 from ResNet20 import resnet20 
+from LeNet256 import LeNet5_256
 
 def load_frozen_mask(checkpoint_id, epoch, root_dir, device):
     """
@@ -55,25 +56,25 @@ def load_frozen_mask(checkpoint_id, epoch, root_dir, device):
 # --- HYPERPARAMETERS & SETTINGS ---
 SETTINGS = {
     "dataset_name": "galaxy10",
-    "batch_size": 32,
+    "batch_size": 64,
     "val_ratio": 0.1,
     "train_epochs": 300,
     "device": torch.device("cuda" if torch.cuda.is_available() else "cpu"),
     "seed": 42,
     
     # Modelo e Perda
-    "model_class": resnet20(),
-    "criterion": nn.CrossEntropyLoss(),
+    "model_class": LeNet5_256(),
+    "criterion": nn.NLLLoss(),
     
     # Otimizador
     "optimizer_class": optim.Adam, # Pode trocar por optim.SGD, optim.AdamW, etc.
-    "optimizer_kwargs": {"lr": 1e-4},
+    "optimizer_kwargs": {"lr": 1e-3},
     
     # Máscara Blindada
-    "mask_checkpoint_id": "galaxy10_resnet34_test",
+    "mask_checkpoint_id": "galaxy10_resnet34_masked",
     "mask_epoch": 160,
     "root_checkpoints": os.path.join(root_path, "checkpoints"),
-    "save_dir": os.path.join(root_path, "checkpoints", "reduction_training_01")
+    "save_dir": os.path.join(root_path, "checkpoints", "galaxy10_lenet_unmasked")
 }
 
 os.makedirs(SETTINGS["save_dir"], exist_ok=True)
@@ -153,8 +154,8 @@ def validate(model, mask_model, loader, device):
     for X, y in loader:
         X, y = X.to(device), y.to(device)
         # Nível máximo de proteção para a máscara
-        X_masked = mask_model(X)
-        outputs = model(X_masked)
+        #X_masked = mask_model(X)
+        outputs = model(X)
         _, predicted = torch.max(outputs, 1)
         all_targets.extend(y.cpu().numpy())
         all_predictions.extend(predicted.cpu().numpy())
@@ -188,11 +189,11 @@ for epoch in range(SETTINGS["train_epochs"]):
         images, labels = images.to(SETTINGS["device"]), labels.to(SETTINGS["device"])
         
         # Blindagem com torch.no_grad() para garantir zero treinamento da máscara
-        with torch.no_grad():
-            masked_images = mask_model(images)
+        #with torch.no_grad():
+        #    masked_images = mask_model(images)
         
         optimizer.zero_grad()
-        outputs = model_classifier(masked_images)
+        outputs = model_classifier(images)
         loss = criterion(outputs, labels)
         loss.backward()
         optimizer.step()
