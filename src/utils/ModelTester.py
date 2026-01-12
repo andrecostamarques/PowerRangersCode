@@ -1,118 +1,125 @@
 """
-Model evaluation module.
+Model Testing Module.
 
-This module provides functionality to load trained model checkpoints (including
-both the classification model and the selection mask) and evaluate their performance
-on a test dataset using confusion matrices.
+This module provides the `ModelTester` class, which facilitates the evaluation
+of trained models (classifier + mask) on a test dataset. It handles checkpoint
+loading, inference execution, and metric calculation.
 """
 
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-from sklearn.metrics import confusion_matrix
+from sklearn.metrics import confusion_matrix, precision_recall_fscore_support
 import numpy as np
 import os 
 import DatasetsDict as dt
 
 class ModelTester: 
     """
-    A utility class for testing and evaluating trained models.
+    Evaluates trained models on a specified dataset.
 
-    This class handles loading model checkpoints, setting up the evaluation environment
-    (device), and computing performance metrics like the confusion matrix on a provided
-    test dataloader.
+    This class manages the loading of test datasets and performs evaluation
+    routines using saved checkpoints. It computes standard classification
+    metrics such as accuracy, precision, recall, and F1-score.
 
     Attributes:
-        device (torch.device): The computation device (CPU or CUDA) used for testing.
-        batch (int): Batch size used for the test dataloader.
+        device (torch.device): The computation device (CPU or CUDA).
+        batch (int): Batch size for the data loader.
         test_loader (DataLoader): DataLoader for the test dataset.
     """
-
     def __init__(self, dataset: str, batch=128):
         """
         Initializes the ModelTester.
 
         Args:
-            dataset (str): The name of the dataset to retrieve from DatasetDict (e.g., 'mnist').
-            batch (int, optional): The batch size for testing. Defaults to 128.
+            dataset (str): The name of the dataset to load (e.g., 'galaxy10').
+            batch (int, optional): Batch size for testing. Defaults to 128.
         """
-        # Set the device for computation
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
         self.batch = batch
-
         db = dt.DatasetDict()
-
         ds_list, _, _ = db.get(dataset)
-
+        # ds_list[1] is the test set
         self.test_loader = torch.utils.data.DataLoader(ds_list[1], batch_size=self.batch, shuffle=False)
 
-    def test(self, model_pth, root_dir_save = '../../checkpoints/'):
+    def test(self, model_id, epoch, root_dir_save='../../checkpoints/'):
         """
-        Evaluates a saved model checkpoint on a test dataset.
+        Performs a full test run and returns MACRO metrics.
 
-        Loads the state dictionaries for both the main model and the mask model from
-        a specified checkpoint file, performs inference on the test loader, and
-        calculates the confusion matrix.
+        Loads the model architecture from the first epoch's checkpoint and the
+        weights from the specified epoch's checkpoint. Then, it runs inference
+        on the test set.
 
         Args:
-            model_pth (str): The relative path to the specific checkpoint file (e.g., 'training_id/checkpoint_epoch_X.pt').
-            root_dir_save (str, optional): The root directory containing the checkpoint file.
+            model_id (str): The unique identifier of the training run.
+            epoch (int): The epoch number to evaluate.
+            root_dir_save (str, optional): Root directory containing checkpoints.
                 Defaults to '../../checkpoints/'.
 
         Returns:
             tuple: A tuple containing:
-                - cm (numpy.ndarray): The confusion matrix of the test results.
-                - all_targets (list): List of ground truth labels.
-                - all_probs (list): List of predicted probabilities for each class.
-                - all_predictions (list): List of predicted class labels.
-        """
-        # Construct path to the first epoch checkpoint to retrieve model architecture objects
-        training_dir = os.path.dirname(model_pth)
-        path_epoch_1 = os.path.join(root_dir_save, training_dir, 'checkpoint_epoch_1.pt')
-        path_epoch_1 = os.path.abspath(path_epoch_1)
+                - cm (numpy.ndarray): Confusion matrix.
+                - accuracy (float): Global accuracy percentage.
+                - precision (float): Macro-averaged precision percentage.
+                - recall (float): Macro-averaged recall percentage.
+                - f1 (float): Macro-averaged F1-score percentage.
+                - targets (list): List of ground truth labels.
+                - probs (list): List of predicted probabilities.
+                - predictions (list): List of predicted class labels.
 
-        # Load the architecture objects (Model and Mask) saved in epoch 1
+        Raises:
+            FileNotFoundError: If the checkpoint file does not exist.
+        """
+        # 1. Dynamic Paths
+        path_epoch_1 = os.path.abspath(os.path.join(root_dir_save, model_id, 'checkpoint_epoch_1.pt'))
+        filename = f'checkpoint_epoch_{epoch}.pt'
+        full_path = os.path.abspath(os.path.join(root_dir_save, model_id, filename))
+
+        if not os.path.exists(full_path):
+            raise FileNotFoundError(f"Checkpoint not found at: {full_path}")
+
+        # 2. Load Architecture (from epoch 1) and Weights (from desired epoch)
         checkpoint_e1 = torch.load(path_epoch_1, map_location=self.device, weights_only=False)
         model = checkpoint_e1['model_obj']
         mask_model = checkpoint_e1['mask_model_obj']
 
-        # Construct the full path for the target checkpoint
-        full_path = os.path.join(root_dir_save, model_pth)
-        full_path = os.path.abspath(full_path)
-
-        # Load the state dictionaries into the models
         checkpoint_model = torch.load(full_path, map_location=self.device, weights_only=False)
         model.load_state_dict(checkpoint_model['model_state_dict'])
-        model.to(self.device)
-        model.eval()
-
-        # Load mask state and set to eval mode
         mask_model.load_state_dict(checkpoint_model['mask_state_dict'])
-        mask_model.to(self.device)
-        mask_model.eval()
+        
+        model.to(self.device).eval()
+        mask_model.to(self.device).eval()
 
         all_targets = []
         all_predictions = []
         all_probs = []
 
-        # Perform inference without gradient calculation
+        # 3. Inference Loop
         with torch.no_grad():
             for X, y in self.test_loader:
-                X = X.to(self.device)
-
+                X, y = X.to(self.device), y.to(self.device)
+                
+                # Pass through the trained mask and then the classifier
                 X_masked = mask_model(X)
                 y_pred = model(X_masked)
-
+                
                 probs = torch.softmax(y_pred, dim=1)
-
                 _, predicted = torch.max(y_pred, 1)
 
                 all_targets.extend(y.cpu().numpy())
                 all_predictions.extend(predicted.cpu().numpy())
                 all_probs.extend(probs.cpu().numpy())
 
-        # Generate the Confusion Matrix to return statistical performance data
+        # 4. Macro Metrics Calculation
         cm = confusion_matrix(all_targets, all_predictions)
+        
+        # average='macro' calculates the metric for each class and takes the arithmetic mean
+        precision, recall, f1, _ = precision_recall_fscore_support(
+            all_targets, all_predictions, average='macro', zero_division=0
+        )
+        
+        # Global Accuracy (Micro) for reference
+        accuracy = np.sum(np.diag(cm)) / np.sum(cm)
 
-        return cm, all_targets, all_probs, all_predictions
+        return (cm, accuracy * 100, precision * 100, recall * 100, f1 * 100, 
+                all_targets, all_probs, all_predictions)
