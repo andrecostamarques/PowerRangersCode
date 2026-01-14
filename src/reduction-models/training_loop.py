@@ -55,26 +55,29 @@ def load_frozen_mask(checkpoint_id, epoch, root_dir, device):
 
 # --- HYPERPARAMETERS & SETTINGS ---
 SETTINGS = {
-    "dataset_name": "galaxy10",
-    "batch_size": 64,
+    "dataset_name": "eurosat",
+    "batch_size": 128,
     "val_ratio": 0.1,
     "train_epochs": 300,
     "device": torch.device("cuda" if torch.cuda.is_available() else "cpu"),
     "seed": 42,
+    
+    # --- NOVA FLAG ---
+    "masked": False, # Se True, aplica a máscara. Se False, treina o modelo puro.
     
     # Modelo e Perda
     "model_class": LeNet5_256(),
     "criterion": nn.NLLLoss(),
     
     # Otimizador
-    "optimizer_class": optim.Adam, # Pode trocar por optim.SGD, optim.AdamW, etc.
+    "optimizer_class": optim.Adam,
     "optimizer_kwargs": {"lr": 1e-3},
     
     # Máscara Blindada
     "mask_checkpoint_id": "galaxy10_resnet34_masked",
     "mask_epoch": 160,
     "root_checkpoints": os.path.join(root_path, "checkpoints"),
-    "save_dir": os.path.join(root_path, "checkpoints", "galaxy10_lenet_unmasked")
+    "save_dir": os.path.join(root_path, "checkpoints", "eurosat_lenet_unmasked")
 }
 
 os.makedirs(SETTINGS["save_dir"], exist_ok=True)
@@ -120,15 +123,18 @@ print(f"✅ Data Ready (Seed: {SETTINGS['seed']})")
 print(f"   - Training: {train_size} samples")
 print(f"   - Validation: {val_size} samples")
 
-# --- 2. CARREGAMENTO E BLINDAGEM DA MÁSCARA ---
-mask_model = load_frozen_mask(
-    checkpoint_id=SETTINGS["mask_checkpoint_id"],
-    epoch=SETTINGS["mask_epoch"],
-    root_dir=SETTINGS["root_checkpoints"],
-    device=SETTINGS["device"]
-)
-
-print(f"✅ Mask loaded and frozen from: {SETTINGS['mask_checkpoint_id']} (Epoch {SETTINGS['mask_epoch']})")
+# --- 2. CARREGAMENTO CONDICIONAL DA MÁSCARA ---
+mask_model = None
+if SETTINGS["masked"]:
+    mask_model = load_frozen_mask(
+        checkpoint_id=SETTINGS["mask_checkpoint_id"],
+        epoch=SETTINGS["mask_epoch"],
+        root_dir=SETTINGS["root_checkpoints"],
+        device=SETTINGS["device"]
+    )
+    print(f"✅ Mask loaded and frozen from: {SETTINGS['mask_checkpoint_id']} (Epoch {SETTINGS['mask_epoch']})")
+else:
+    print("ℹ️ Mode: UNMASKED. Training directly on raw dataset images.")
 
 # --- 3. INICIALIZAÇÃO DINÂMICA DO OTIMIZADOR ---
 model_classifier = SETTINGS["model_class"].to(SETTINGS["device"])
@@ -145,20 +151,25 @@ if opt_class in [optim.Adam, optim.AdamW]:
 optimizer = opt_class(model_classifier.parameters(), **opt_kwargs)
 criterion = SETTINGS["criterion"]
 
-# --- 4. FUNÇÕES DE SUPORTE ---
+# --- 4. FUNÇÕES DE SUPORTE ADAPTADAS ---
 @torch.no_grad()
-def validate(model, mask_model, loader, device):
+def validate(model, mask_model, loader, device, use_mask):
     model.eval()
-    mask_model.eval()
+    if mask_model: mask_model.eval()
+    
     all_targets, all_predictions = [], []
     for X, y in loader:
         X, y = X.to(device), y.to(device)
-        # Nível máximo de proteção para a máscara
-        #X_masked = mask_model(X)
+        
+        # Lógica Condicional de Validação
+        if use_mask and mask_model:
+            X = mask_model(X)
+            
         outputs = model(X)
         _, predicted = torch.max(outputs, 1)
         all_targets.extend(y.cpu().numpy())
         all_predictions.extend(predicted.cpu().numpy())
+        
     cm = confusion_matrix(all_targets, all_predictions)
     accuracy = 100 * cm.diagonal().sum() / cm.sum()
     return cm, accuracy
@@ -170,16 +181,19 @@ def save_checkpoint(epoch, model, mask_model, optimizer, accuracy, cm, save_path
         'optimizer_state_dict': optimizer.state_dict(),
         'accuracy': accuracy,
         'cm': cm,
-        'mask_source': SETTINGS["mask_checkpoint_id"]
+        'mask_source': SETTINGS["mask_checkpoint_id"] if SETTINGS["masked"] else "None",
+        'is_masked_training': SETTINGS["masked"]
     }
     if epoch == 0:
         checkpoint['model_obj'] = model
-        checkpoint['mask_model_obj'] = mask_model 
+        if SETTINGS["masked"]:
+            checkpoint['mask_model_obj'] = mask_model 
+            
     torch.save(checkpoint, os.path.join(save_path, f'checkpoint_epoch_{epoch+1}.pt'))
 
-# --- 5. LOOP DE TREINAMENTO ---
-print(f"🚀 Treino Iniciado: Classificador ResNet + Máscara Época {SETTINGS['mask_epoch']}")
-print(f"🔧 Otimizador: {opt_class.__name__} com {opt_kwargs}")
+# --- 5. LOOP DE TREINAMENTO ADAPTADO ---
+mode_str = "COM MÁSCARA" if SETTINGS["masked"] else "PURO (UNMASKED)"
+print(f"🚀 Treino Iniciado: {mode_str}")
 
 for epoch in range(SETTINGS["train_epochs"]):
     model_classifier.train()
@@ -188,9 +202,10 @@ for epoch in range(SETTINGS["train_epochs"]):
     for images, labels in train_loader:
         images, labels = images.to(SETTINGS["device"]), labels.to(SETTINGS["device"])
         
-        # Blindagem com torch.no_grad() para garantir zero treinamento da máscara
-        #with torch.no_grad():
-        #    masked_images = mask_model(images)
+        # Aplicação condicional da máscara
+        if SETTINGS["masked"] and mask_model:
+            with torch.no_grad():
+                images = mask_model(images)
         
         optimizer.zero_grad()
         outputs = model_classifier(images)
@@ -199,10 +214,15 @@ for epoch in range(SETTINGS["train_epochs"]):
         optimizer.step()
         running_loss += loss.item()
 
-    # Validação e Checkpoint
-    val_cm, val_acc = validate(model_classifier, mask_model, val_loader, SETTINGS["device"])
+    # Validação e Checkpoint passandro a flag masked
+    val_cm, val_acc = validate(
+        model_classifier, 
+        mask_model, 
+        val_loader, 
+        SETTINGS["device"], 
+        SETTINGS["masked"]
+    )
+    
     save_checkpoint(epoch, model_classifier, mask_model, optimizer, val_acc, val_cm, SETTINGS["save_dir"])
 
     print(f"Época [{epoch+1}/{SETTINGS['train_epochs']}] - Loss: {running_loss/len(train_loader):.4f} - Val Acc: {val_acc:.2f}%")
-
-print(f"🏁 Processo finalizado. Resultados em: {SETTINGS['save_dir']}")

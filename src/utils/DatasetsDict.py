@@ -8,6 +8,7 @@ and testing.
 
 import torch
 from torchvision import datasets, transforms
+from torch.utils.data import random_split
 from CustomDatasets import Galaxy10HFDataset
 
 
@@ -160,6 +161,40 @@ class DatasetDict:
         ]
         
         self.datasets['galaxy10'] = (galaxy10_ds, galaxy10_tf_train, galaxy10_tf_test)
+
+        # =========================================================================
+        # 6. EuroSAT
+        # =========================================================================
+        # EuroSAT é 256x256 por padrão no seu teste com LeNet
+        eurosat_mean = (0.485, 0.456, 0.406)
+        eurosat_std  = (0.229, 0.224, 0.225)
+
+        eurosat_tf = transforms.Compose([
+            transforms.Resize((256, 256)),
+            transforms.ToTensor(),
+            transforms.Normalize(eurosat_mean, eurosat_std),
+        ])
+
+        # O EuroSAT não possui split='train' ou 'test' nativo no torchvision
+        # Carregamos o dataset completo e dividimos manualmente
+        full_eurosat = datasets.EuroSAT(
+            root=f'{self.data_root}eurosat', 
+            download=True, 
+            transform=eurosat_tf
+        )
+
+        # Divisão 80% treino, 20% teste
+        train_len = int(0.8 * len(full_eurosat))
+        test_len = len(full_eurosat) - train_len
+        
+        # Gerando os objetos de dataset
+        eurosat_train, eurosat_test = random_split(
+            full_eurosat, 
+            [train_len, test_len],
+            generator=torch.Generator().manual_seed(42) # Seed fixa para reprodutibilidade
+        )
+
+        self.datasets['eurosat'] = ([eurosat_train, eurosat_test], eurosat_tf, eurosat_tf)
 
     def get(self, name):
         """
