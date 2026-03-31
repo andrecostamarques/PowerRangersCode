@@ -42,7 +42,7 @@ class ModelTester:
         # ds_list[1] is the test set
         self.test_loader = torch.utils.data.DataLoader(ds_list[1], batch_size=self.batch, shuffle=False)
 
-    def test(self, model_id, epoch, root_dir_save='../../checkpoints/', use_mask=True):
+    def test(self, model_id, epoch, root_dir_save='../../checkpoints/'):
         """
         Evaluates the classifier from a specific epoch.
 
@@ -78,21 +78,12 @@ class ModelTester:
         checkpoint_e1 = torch.load(path_epoch_1, map_location=self.device, weights_only=False)
         model = checkpoint_e1['model_obj']
         
-        # Only retrieve the mask if the flag is active
-        mask_model = None
-        if use_mask:
-            mask_model = checkpoint_e1.get('mask_model_obj', None)
-            if mask_model is None:
-                print(f"⚠️ Warning: 'use_mask' is True, but 'mask_model_obj' was not found in {model_id}.")
 
         # 3. Load Classifier Weights (Epoch X)
         checkpoint_target = torch.load(full_path_target, map_location=self.device, weights_only=False)
         model.load_state_dict(checkpoint_target['model_state_dict'])
         
         model.to(self.device).eval()
-        if mask_model:
-            mask_model.to(self.device).eval()
-
         all_targets, all_predictions, all_probs = [], [], []
 
         # 4. Inference
@@ -100,10 +91,7 @@ class ModelTester:
             for X, y in self.test_loader:
                 X, y = X.to(self.device), y.to(self.device)
                 
-                # MASK APPLICATION: Only if use_mask=True AND mask exists
-                X_input = mask_model(X) if (use_mask and mask_model) else X
-                
-                y_pred = model(X_input)
+                y_pred = model(X)
                 
                 probs = torch.softmax(y_pred, dim=1)
                 _, predicted = torch.max(y_pred, 1)
