@@ -107,6 +107,7 @@ class StaticMaskTraining:
         root_dir = self.config.root_dir_save
         self.checkpoint_dir = os.path.abspath(os.path.join(root_dir, self.training_id))
         os.makedirs(self.checkpoint_dir, exist_ok=True)
+        self.start_epoch = 0
     
         
     def train_epoch(self):
@@ -275,7 +276,7 @@ class StaticMaskTraining:
             
             writer.writerow(data)
 
-    def train(self):
+    def train(self, resume=False):
         """
         Executes the full training pipeline.
 
@@ -286,12 +287,43 @@ class StaticMaskTraining:
         4. Logs metrics to console and CSV.
         5. Saves a checkpoint.
         """
+        if resume:
+            import glob
+            import re
+            ckpt_files = glob.glob(os.path.join(self.checkpoint_dir, 'checkpoint_epoch_*.pt'))
+            if ckpt_files:
+                epochs = []
+                for f in ckpt_files:
+                    match = re.search(r'checkpoint_epoch_(\d+)\.pt', f)
+                    if match:
+                        epochs.append((int(match.group(1)), f))
+                epochs.sort()
+                
+                loaded = False
+                for epoch_num, ckpt_file in reversed(epochs):
+                    try:
+                        print(f"Attempting to load checkpoint: {ckpt_file}...")
+                        checkpoint = torch.load(ckpt_file, map_location=self.device, weights_only=False)
+                        
+                        self.model.load_state_dict(checkpoint['model_state_dict'])
+                        self.mask_model.load_state_dict(checkpoint['mask_state_dict'])
+                        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+                        self.lambda_scheduler.lbd = checkpoint['lambda']
+                        
+                        self.start_epoch = checkpoint['epoch'] # this is epoch + 1 of the checkpoint
+                        print(f"Successfully loaded checkpoint from epoch {epoch_num}. Resuming training from epoch {self.start_epoch + 1}...")
+                        loaded = True
+                        break
+                    except Exception as e:
+                        print(f"Warning: Failed to load checkpoint {ckpt_file}: {e}. Trying previous one...")
+                if not loaded:
+                    print("No valid checkpoints could be loaded. Starting from scratch.")
 
         #Debbugin
         print(f"Starting training ({self.config.n_epochs} epochs) in {self.device}.")
         print(f"Checkpoints will be saved in: {self.checkpoint_dir}")
         
-        for epoch in range(self.config.n_epochs):
+        for epoch in range(self.start_epoch, self.config.n_epochs):
             print(f"\nEpoch: {epoch+1}/{self.config.n_epochs}")
 
             #Training
