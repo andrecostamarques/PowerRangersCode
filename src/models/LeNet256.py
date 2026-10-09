@@ -12,7 +12,7 @@ class LeNet256(nn.Module):
     LeNet-5 Convolutional Neural Network architecture adapted for RGB 256x256 images.
     Uses AdaptiveAvgPool2d to reduce spatial dimensions to 3x3 before fully connected layers.
     """
-    def __init__(self):
+    def __init__(self, num_classes=10):
         super(LeNet256, self).__init__()
         # 3 input channels instead of 1
         self.conv1 = nn.Conv2d(3, 6, kernel_size=5, stride=1, padding=2)
@@ -25,7 +25,7 @@ class LeNet256(nn.Module):
         self.adaptive_pool = nn.AdaptiveAvgPool2d((3, 3))
         
         self.fc1 = nn.Linear(120 * 3 * 3, 84)
-        self.fc2 = nn.Linear(84, 10)
+        self.fc2 = nn.Linear(84, num_classes)
         self.softmax = nn.LogSoftmax(dim=1)
         
     def forward(self, x):

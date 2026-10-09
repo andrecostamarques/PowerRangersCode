@@ -36,9 +36,16 @@ def get_active_pixels_ratio(checkpoint):
         return (active_pixels / total_pixels) * 100
     return None
 
+import argparse
+
 def main():
+    parser = argparse.ArgumentParser(description="Extract performance metrics from model checkpoints.")
+    parser.add_argument("--dataset", type=str, default="food101", choices=["food101", "galaxy10"], help="Dataset to extract metrics for (default: food101)")
+    args = parser.parse_args()
+
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
     checkpoints_dir = os.path.join(project_root, 'checkpoints')
+    dataset_dir = os.path.join(checkpoints_dir, args.dataset) if os.path.exists(os.path.join(checkpoints_dir, args.dataset)) else checkpoints_dir
     
     models = ["lenet256", "resnet20", "resnet34", "simplecnnrgb"]
     regimes = {
@@ -51,8 +58,11 @@ def main():
     
     for model in models:
         for suffix, regime_name in regimes.items():
-            folder_name = f"galaxy10_{model}_{suffix}"
-            folder_path = os.path.join(checkpoints_dir, folder_name)
+            # Check both dataset subdirectory structure and flat structure
+            folder_name = f"{args.dataset}_{model}_{suffix}"
+            folder_path = os.path.join(dataset_dir, folder_name)
+            if not os.path.exists(folder_path):
+                folder_path = os.path.join(checkpoints_dir, folder_name)
             
             if not os.path.exists(folder_path):
                 results.append({
@@ -72,19 +82,20 @@ def main():
             pt_files = glob.glob(os.path.join(folder_path, "checkpoint_epoch_*.pt"))
             best_ckpt_file = None
             best_epoch = None
+            
+            # Sort by epoch number descending to get latest/best epoch
+            epoch_files = []
             for f in pt_files:
                 match = re.search(r'checkpoint_epoch_(\d+)\.pt', f)
                 if match:
-                    epoch_num = int(match.group(1))
-                    if epoch_num != 1:
-                        best_ckpt_file = f
-                        best_epoch = epoch_num
-                        break
+                    epoch_files.append((int(match.group(1)), f))
             
-            # Fallback if only epoch 1 exists or if structure is different
-            if not best_ckpt_file and os.path.exists(os.path.join(folder_path, "checkpoint_epoch_1.pt")):
-                best_ckpt_file = os.path.join(folder_path, "checkpoint_epoch_1.pt")
-                best_epoch = 1
+            epoch_files.sort(key=lambda x: x[0], reverse=True)
+            for epoch_num, f in epoch_files:
+                if epoch_num != 1 or len(epoch_files) == 1:
+                    best_ckpt_file = f
+                    best_epoch = epoch_num
+                    break
                 
             if not best_ckpt_file:
                 results.append({
@@ -123,8 +134,13 @@ def main():
                     else:
                         sparsity_val = "Error"
                 elif suffix == "consensus_mask":
-                    # Load consensus_mask.pt to get its sparsity
-                    consensus_path = os.path.join(checkpoints_dir, 'consensus_mask.pt')
+                    # Load consensus mask file
+                    consensus_path = os.path.join(dataset_dir, f"consensus_mask_{args.dataset}.pt")
+                    if not os.path.exists(consensus_path):
+                        consensus_path = os.path.join(checkpoints_dir, f"consensus_mask_{args.dataset}.pt")
+                    if not os.path.exists(consensus_path):
+                        consensus_path = os.path.join(checkpoints_dir, "consensus_mask.pt")
+                        
                     if os.path.exists(consensus_path):
                         cons_ckpt = torch.load(consensus_path, map_location='cpu', weights_only=False)
                         ratio = get_active_pixels_ratio(cons_ckpt)
@@ -133,7 +149,7 @@ def main():
                         else:
                             sparsity_val = "Error"
                     else:
-                        sparsity_val = "Missing consensus_mask.pt"
+                        sparsity_val = "Missing consensus_mask"
                 
                 results.append({
                     "model": model,
@@ -161,7 +177,7 @@ def main():
                 })
                 
     # Print the markdown table
-    print("# Galaxy10 Model Performance Comparison\n")
+    print(f"# {args.dataset.upper()} Model Performance Comparison\n")
     print("| Model Architecture | Training Regime | Best Epoch | Val Accuracy | Precision | Recall | F1-Score | Active Pixels (Sparsity) | Status |")
     print("| --- | --- | --- | --- | --- | --- | --- | --- | --- |")
     for r in results:

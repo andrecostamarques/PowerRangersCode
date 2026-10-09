@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
 """
 Experiment execution script.
-Runs the training loop for Galaxy10 dataset across all three models:
+Runs the training loop for any dataset (Galaxy10, Food-101, CIFAR-10) across all four models:
 - ResNet20 (3 channels, 256x256)
-- LeNet5RGB (3 channels, 256x256)
+- LeNet256 (3 channels, 256x256)
 - SimpleCNNRGB (3 channels, 256x256)
+- ResNet34 (3 channels, 256x256)
 
 Each model has custom configuration, including optimized lambdas and loss functions.
-All models run on the native RGB 256x256 Galaxy10 dataset.
 """
 
 import sys
 import os
+import argparse
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../utils')))
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../models')))
 
@@ -26,171 +27,74 @@ from DatasetsDict import DatasetDict
 from LeNet256 import LeNet256
 from ResNet20 import resnet20
 from SimpleCNNRGB import SimpleCNNRGB
+from torchvision.models import resnet34
 import SelectionMask as sm
 
 
-def run_resnet20(resume=False):
-    print("\n" + "="*50)
-    print("STARTING EXPERIMENT: ResNet20 on Galaxy10")
-    print("="*50)
+def get_num_classes(dataset_name):
+    if dataset_name.lower() == 'food101':
+        return 101
+    return 10
+
+
+def run_model(model_name, dataset_name="galaxy10", epochs=200, resume=False):
+    print("\n" + "="*60)
+    print(f"STARTING EXPERIMENT: {model_name.upper()} on {dataset_name.upper()}")
+    print("="*60)
     
     db = DatasetDict()
-    ds_list, tf_train, tf_test = db.get("galaxy10")
+    ds_list, tf_train, tf_test = db.get(dataset_name)
+    num_classes = get_num_classes(dataset_name)
     
-    resnet_config = { 
-        "model": resnet20(), 
-        "n_epochs": 200, 
-        "batch_size": 64, 
-        "mask_shape": (3, 256, 256), 
-        "model_learning_rate": 1e-4, 
-        "mask_learning_rate": 0.001, 
-        
-        # Params for the lambda scheduler
-        "lambda_init": 1.0, 
-        "lambda_factor": 1.5, 
-        "lambda_patience": 2,
-        "lambda_treshold": 0.0025, 
-        
-        # Params for class/training identification
-        "training_id": "galaxy10_resnet20_200epochs",
-        "optimizer_class": optim.AdamW,
-        "model_loss_function": nn.CrossEntropyLoss, # ResNet20 outputs logits
-        "mask_model": sm.SelectionMask,
-        "mask_loss_function": sm.mask_l1_loss,
-        
-        # Params for the dataset
-        "datasets": ds_list, 
-        "transform_train": tf_train, 
-        "transform_test": tf_test,
-        "eval_split": 0.1,
-        "seed": 42,
-    }
-    
-    config = TrainingConfig(**resnet_config)   
-    trainer = StaticMaskTraining(config) 
-    trainer.train(resume=resume)
+    if model_name == 'resnet20':
+        model = resnet20(num_classes=num_classes)
+        loss_fn = nn.CrossEntropyLoss
+        lr = 1e-4
+        lambda_init = 1.0
+        lambda_patience = 2
+    elif model_name == 'resnet34':
+        model = resnet34(weights=None)
+        model.fc = nn.Linear(model.fc.in_features, num_classes)
+        loss_fn = nn.CrossEntropyLoss
+        lr = 1e-4
+        lambda_init = 1.0
+        lambda_patience = 2
+    elif model_name == 'lenet256':
+        model = LeNet256(num_classes=num_classes)
+        loss_fn = nn.NLLLoss
+        lr = 1e-3
+        lambda_init = 0.1
+        lambda_patience = 3
+    elif model_name == 'simplecnnrgb':
+        model = SimpleCNNRGB(num_classes=num_classes)
+        loss_fn = nn.NLLLoss
+        lr = 1e-3
+        lambda_init = 0.1
+        lambda_patience = 3
+    else:
+        raise ValueError(f"Unknown model name: {model_name}")
 
+    training_id = f"{dataset_name.lower()}_{model_name}_200epochs"
 
-def run_lenet256(resume=False):
-    print("\n" + "="*50)
-    print("STARTING EXPERIMENT: LeNet256 on Galaxy10")
-    print("="*50)
-    
-    db = DatasetDict()
-    ds_list, tf_train, tf_test = db.get("galaxy10")
-    
-    lenet_config = { 
-        "model": LeNet256(), 
-        "n_epochs": 200, 
-        "batch_size": 64, 
-        "mask_shape": (3, 256, 256), 
-        "model_learning_rate": 1e-3, # Standard for LeNet256 with AdamW
-        "mask_learning_rate": 0.001, 
-        
-        # Params for the lambda scheduler
-        # LeNet256 has lower capacity, start with a smaller lambda to let it learn first
-        "lambda_init": 0.1, 
-        "lambda_factor": 1.5, 
-        "lambda_patience": 3,
-        "lambda_treshold": 0.0025, 
-        
-        # Params for class/training identification
-        "training_id": "galaxy10_lenet256_200epochs",
-        "optimizer_class": optim.AdamW,
-        "model_loss_function": nn.NLLLoss, # LeNet256 outputs log-softmax
-        "mask_model": sm.SelectionMask,
-        "mask_loss_function": sm.mask_l1_loss,
-        
-        # Params for the dataset
-        "datasets": ds_list, 
-        "transform_train": tf_train, 
-        "transform_test": tf_test,
-        "eval_split": 0.1,
-        "seed": 42,
-    }
-    
-    config = TrainingConfig(**lenet_config)   
-    trainer = StaticMaskTraining(config) 
-    trainer.train(resume=resume)
-
-
-def run_simplecnnrgb(resume=False):
-    print("\n" + "="*50)
-    print("STARTING EXPERIMENT: SimpleCNNRGB on Galaxy10")
-    print("="*50)
-    
-    db = DatasetDict()
-    ds_list, tf_train, tf_test = db.get("galaxy10")
-    
-    simplecnn_config = { 
-        "model": SimpleCNNRGB(), 
-        "n_epochs": 200, 
-        "batch_size": 64, 
-        "mask_shape": (3, 256, 256), 
-        "model_learning_rate": 1e-3, 
-        "mask_learning_rate": 0.001, 
-        
-        # Params for the lambda scheduler
-        # SimpleCNNRGB has lower capacity than ResNet, start with a smaller lambda
-        "lambda_init": 0.1, 
-        "lambda_factor": 1.5, 
-        "lambda_patience": 3,
-        "lambda_treshold": 0.0025, 
-        
-        # Params for class/training identification
-        "training_id": "galaxy10_simplecnnrgb_200epochs",
-        "optimizer_class": optim.AdamW,
-        "model_loss_function": nn.NLLLoss, # SimpleCNNRGB outputs log-softmax
-        "mask_model": sm.SelectionMask,
-        "mask_loss_function": sm.mask_l1_loss,
-        
-        # Params for the dataset
-        "datasets": ds_list, 
-        "transform_train": tf_train, 
-        "transform_test": tf_test,
-        "eval_split": 0.1,
-        "seed": 42,
-    }
-    
-    config = TrainingConfig(**simplecnn_config)   
-    trainer = StaticMaskTraining(config) 
-    trainer.train(resume=resume)
-
-
-def run_resnet34(resume=False):
-    print("\n" + "="*50)
-    print("STARTING EXPERIMENT: ResNet34 on Galaxy10")
-    print("="*50)
-    
-    db = DatasetDict()
-    ds_list, tf_train, tf_test = db.get("galaxy10")
-    
-    from torchvision.models import resnet34
-    model = resnet34(weights=None)
-    model.fc = nn.Linear(model.fc.in_features, 10)
-    
-    resnet_config = { 
+    config_dict = { 
         "model": model, 
-        "n_epochs": 300, 
+        "n_epochs": epochs, 
         "batch_size": 64, 
         "mask_shape": (3, 256, 256), 
-        "model_learning_rate": 1e-4, 
+        "model_learning_rate": lr, 
         "mask_learning_rate": 0.001, 
         
-        # Params for the lambda scheduler
-        "lambda_init": 1.0, 
+        "lambda_init": lambda_init, 
         "lambda_factor": 1.5, 
-        "lambda_patience": 2,
+        "lambda_patience": lambda_patience,
         "lambda_treshold": 0.0025, 
         
-        # Params for class/training identification
-        "training_id": "galaxy10_resnet34",
+        "training_id": training_id,
         "optimizer_class": optim.AdamW,
-        "model_loss_function": nn.CrossEntropyLoss,
+        "model_loss_function": loss_fn,
         "mask_model": sm.SelectionMask,
         "mask_loss_function": sm.mask_l1_loss,
         
-        # Params for the dataset
         "datasets": ds_list, 
         "transform_train": tf_train, 
         "transform_test": tf_test,
@@ -198,14 +102,13 @@ def run_resnet34(resume=False):
         "seed": 42,
     }
     
-    config = TrainingConfig(**resnet_config)   
+    config = TrainingConfig(**config_dict)   
     trainer = StaticMaskTraining(config) 
     trainer.train(resume=resume)
 
 
 def main():
-    import argparse
-    parser = argparse.ArgumentParser(description="Run training experiments for Galaxy10 across multiple models.")
+    parser = argparse.ArgumentParser(description="Run training experiments across multiple models and datasets.")
     parser.add_argument(
         "--model", 
         type=str, 
@@ -214,25 +117,28 @@ def main():
         help="Specify which model to train. Default is 'all'."
     )
     parser.add_argument(
+        "--dataset",
+        type=str,
+        default="galaxy10",
+        help="Specify dataset from DatasetDict (e.g. galaxy10, cifar10, food101). Default is galaxy10."
+    )
+    parser.add_argument(
+        "--epochs",
+        type=int,
+        default=200,
+        help="Number of epochs to train. Default is 200."
+    )
+    parser.add_argument(
         "--resume",
         action="store_true",
         help="Attempt to resume training from the latest valid checkpoint."
     )
     args = parser.parse_args()
 
-    if args.model == "all":
-        run_resnet20(resume=args.resume)
-        run_resnet34(resume=args.resume)
-        run_lenet256(resume=args.resume)
-        run_simplecnnrgb(resume=args.resume)
-    elif args.model == "resnet20":
-        run_resnet20(resume=args.resume)
-    elif args.model == "resnet34":
-        run_resnet34(resume=args.resume)
-    elif args.model == "lenet256":
-        run_lenet256(resume=args.resume)
-    elif args.model == "simplecnnrgb":
-        run_simplecnnrgb(resume=args.resume)
+    models_to_run = ["lenet256", "resnet20", "simplecnnrgb", "resnet34"] if args.model == "all" else [args.model]
+    
+    for m in models_to_run:
+        run_model(m, dataset_name=args.dataset, epochs=args.epochs, resume=args.resume)
 
 
 if __name__ == "__main__":

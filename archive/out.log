@@ -1,0 +1,3 @@
+Reading PDF from: /home/andre-marques/Desktop/Estudo/PowerRangersCode/apresentação 2.0.pdf
+Failed to extract text with pypdf: No module named 'pypdf'
+Failed to convert to images using fitz: No module named 'fitz'

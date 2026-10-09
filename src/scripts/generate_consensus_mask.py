@@ -9,12 +9,19 @@ import torch
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
 sys.path.append(os.path.join(project_root, 'src/models'))
 sys.path.append(os.path.join(project_root, 'src/utils'))
+sys.stdout.reconfigure(line_buffering=True)
 
 from SelectionMask import SelectionMask
 
 def main():
     import argparse
-    parser = argparse.ArgumentParser(description="Generate a consensus mask from the best checkpoints of the 4 models.")
+    parser = argparse.ArgumentParser(description="Generate a consensus mask from trained learnable masks.")
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        default="galaxy10",
+        help="Target dataset name (e.g., galaxy10, food101, cifar10). Default is galaxy10."
+    )
     parser.add_argument(
         "--checkpoints_dir", 
         type=str, 
@@ -24,8 +31,8 @@ def main():
     parser.add_argument(
         "--output_path", 
         type=str, 
-        default=os.path.join(project_root, 'checkpoints/consensus_mask.pt'),
-        help="Path where the consensus mask checkpoint will be saved."
+        default=None,
+        help="Path where the consensus mask checkpoint will be saved. Defaults to checkpoints/consensus_mask_<dataset>.pt"
     )
     parser.add_argument(
         "--threshold", 
@@ -33,44 +40,83 @@ def main():
         default=0.5,
         help="Binarization threshold for the averaged mask (0.0 to 1.0). Default is 0.5 (majority vote)."
     )
+    parser.add_argument(
+        "--exclude",
+        type=str,
+        default=None,
+        help="Optional model name to exclude from consensus (e.g., resnet34)."
+    )
     args = parser.parse_args()
+
+    if args.output_path is None:
+        if args.exclude:
+            args.output_path = os.path.join(args.checkpoints_dir, f"consensus_mask_{args.dataset.lower()}_no_{args.exclude.lower()}.pt")
+        else:
+            args.output_path = os.path.join(args.checkpoints_dir, f"consensus_mask_{args.dataset.lower()}.pt")
 
     print(f"Project root: {project_root}")
     print(f"Checkpoints directory: {args.checkpoints_dir}")
+    print(f"Output path: {args.output_path}")
 
-    # List of the 4 folders
-    folders = [
-        "galaxy10_lenet256_200epochs",
-        "galaxy10_resnet20_200epochs",
-        "galaxy10_resnet34_200epochs",
-        "galaxy10_simplecnnrgb_200epochs"
-    ]
+    all_models = ["lenet256", "resnet20", "simplecnnrgb", "resnet34"]
+    if args.exclude:
+        all_models = [m for m in all_models if m.lower() != args.exclude.lower()]
+        print(f"Excluding model '{args.exclude}'. Models included: {all_models}")
+
+    folders = [f"{args.dataset.lower()}_{m}_200epochs" for m in all_models]
 
     bin_masks = []
     base_mask_model = None
 
-    for folder_name in folders:
-        folder_path = os.path.join(args.checkpoints_dir, folder_name)
-        if not os.path.exists(folder_path):
-            print(f"Error: Directory {folder_path} does not exist. Skipping.")
+    for model_name in all_models:
+        folder_name = f"{args.dataset.lower()}_{model_name}_200epochs"
+        possible_paths = [
+            os.path.join(args.checkpoints_dir, folder_name),
+            os.path.join(args.checkpoints_dir, args.dataset.lower(), folder_name),
+            os.path.join(args.checkpoints_dir, args.dataset.lower(), model_name),
+        ]
+        
+        folder_path = None
+        for p in possible_paths:
+            if os.path.exists(p):
+                folder_path = p
+                break
+
+        # Se não encontrou nos caminhos padrões, faz busca recursiva na pasta de checkpoints
+        if not folder_path and os.path.exists(args.checkpoints_dir):
+            target_ds = args.dataset.lower()
+            target_model = model_name.lower()
+            for root, dirs, _ in os.walk(args.checkpoints_dir):
+                for d in dirs:
+                    d_lower = d.lower()
+                    if (target_ds in root.lower() or target_ds in d_lower) and target_model in d_lower:
+                        check_path = os.path.join(root, d)
+                        if any(f.startswith("checkpoint_epoch_") for f in os.listdir(check_path)):
+                            folder_path = check_path
+                            break
+                if folder_path:
+                    break
+
+        if not folder_path:
+            print(f"Error: Directory for model '{model_name}' (dataset '{args.dataset}') not found in checkpoints hierarchy. Skipping.")
             continue
 
-        # Find the best checkpoint (checkpoint_epoch_X.pt where X != 1)
+        # Encontra o último/melhor checkpoint ordenando por número de época
         pt_files = glob.glob(os.path.join(folder_path, "checkpoint_epoch_*.pt"))
-        best_ckpt_file = None
+        epochs_files = []
         for f in pt_files:
             match = re.search(r'checkpoint_epoch_(\d+)\.pt', f)
             if match:
-                epoch_num = int(match.group(1))
-                if epoch_num != 1:
-                    best_ckpt_file = f
-                    break
+                epochs_files.append((int(match.group(1)), f))
+
+        epochs_files.sort(key=lambda x: x[0], reverse=True) # Maior número de época primeiro
+        best_ckpt_file = epochs_files[0][1] if epochs_files else None
 
         if not best_ckpt_file:
-            print(f"Warning: Could not find best checkpoint (epoch != 1) in {folder_path}.")
+            print(f"Warning: Could not find checkpoint files in {folder_path}.")
             continue
 
-        print(f"Loading best checkpoint for {folder_name} from: {best_ckpt_file}")
+        print(f"Loading checkpoint for {folder_name} (Epoch {epochs_files[0][0]}) from: {best_ckpt_file}")
         try:
             checkpoint = torch.load(best_ckpt_file, map_location='cpu', weights_only=False)
             if 'mask_state_dict' not in checkpoint:
@@ -88,21 +134,13 @@ def main():
             ratio = active_pixels / total_pixels
             print(f"  -> Active pixels: {active_pixels}/{total_pixels} ({ratio * 100:.2f}%)")
 
+            if base_mask_model is None:
+                base_mask_model = SelectionMask(shape=bin_mask.shape)
+                print(f"Instantiated SelectionMask template with shape {bin_mask.shape}")
+
         except Exception as e:
             print(f"Error loading {best_ckpt_file}: {e}")
             continue
-
-        # Load epoch 1 checkpoint to extract the mask_model_obj structure if not done yet
-        if base_mask_model is None:
-            epoch1_path = os.path.join(folder_path, "checkpoint_epoch_1.pt")
-            if os.path.exists(epoch1_path):
-                try:
-                    checkpoint_e1 = torch.load(epoch1_path, map_location='cpu', weights_only=False)
-                    if 'mask_model_obj' in checkpoint_e1:
-                        base_mask_model = checkpoint_e1['mask_model_obj']
-                        print(f"Loaded base SelectionMask object template from {epoch1_path}")
-                except Exception as e:
-                    print(f"Warning: Failed to load epoch 1 template from {epoch1_path}: {e}")
 
     if not bin_masks:
         print("Error: No binary masks could be loaded. Cannot generate consensus mask.")
@@ -140,6 +178,12 @@ def main():
     os.makedirs(os.path.dirname(args.output_path), exist_ok=True)
     torch.save(out_checkpoint, args.output_path)
     print(f"Consensus mask successfully generated and saved to: {args.output_path}")
+
+    ds_sub_path = os.path.join(args.checkpoints_dir, args.dataset.lower(), f"consensus_mask_{args.dataset.lower()}.pt")
+    if os.path.abspath(ds_sub_path) != os.path.abspath(args.output_path):
+        os.makedirs(os.path.dirname(ds_sub_path), exist_ok=True)
+        torch.save(out_checkpoint, ds_sub_path)
+        print(f"Also saved copy to: {ds_sub_path}")
 
 if __name__ == "__main__":
     main()

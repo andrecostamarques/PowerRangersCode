@@ -12,7 +12,7 @@ class SimpleCNNRGB(nn.Module):
     """
     A simple Convolutional Neural Network architecture adapted for RGB 256x256 images.
     """
-    def __init__(self):
+    def __init__(self, num_classes=10):
         super(SimpleCNNRGB, self).__init__()
         # 3 input channels instead of 1
         self.conv1 = nn.Conv2d(3, 32, kernel_size=3, padding="same")
@@ -24,7 +24,7 @@ class SimpleCNNRGB(nn.Module):
         
         # Input to fc1 is 128 * 32 * 32 for 256x256 input
         self.fc1 = nn.Linear(128 * 32 * 32, 512)
-        self.fc2 = nn.Linear(512, 10)
+        self.fc2 = nn.Linear(512, num_classes)
         self.softmax = nn.LogSoftmax(dim=1)
 
     def forward(self, x):

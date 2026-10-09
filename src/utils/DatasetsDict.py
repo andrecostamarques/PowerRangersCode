@@ -161,6 +161,63 @@ class DatasetDict:
         
         self.datasets['galaxy10'] = (galaxy10_ds, galaxy10_tf_train, galaxy10_tf_test)
 
+        # =========================================================================
+        # 6. Food-101
+        # =========================================================================
+        food101_mean = (0.485, 0.456, 0.406)
+        food101_std  = (0.229, 0.224, 0.225)
+
+        food101_tf_train = transforms.Compose([
+            transforms.Resize((256, 256)),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize(food101_mean, food101_std),
+        ])
+
+        food101_tf_test = transforms.Compose([
+            transforms.Resize((256, 256)),
+            transforms.ToTensor(),
+            transforms.Normalize(food101_mean, food101_std),
+        ])
+
+        try:
+            food101_ds = [
+                datasets.Food101(root=f'{self.data_root}food101', split='train', download=True, transform=food101_tf_train),
+                datasets.Food101(root=f'{self.data_root}food101', split='test', download=True, transform=food101_tf_test)
+            ]
+            self.datasets['food101'] = (food101_ds, food101_tf_train, food101_tf_test)
+        except Exception as e:
+            print(f"Warning: Could not initialize Food101 dataset: {e}")
+
+        # =========================================================================
+        # 7. CIFAKE / CIFAR-10 Resized
+        # =========================================================================
+        import os
+        cifake_root = os.path.join(self.data_root, 'cifake')
+        cifake_mean = (0.4914, 0.4822, 0.4465)
+        cifake_std  = (0.2470, 0.2435, 0.2616)
+
+        cifake_tf_train = transforms.Compose([
+            transforms.Resize((256, 256)),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize(cifake_mean, cifake_std),
+        ])
+
+        cifake_tf_test = transforms.Compose([
+            transforms.Resize((256, 256)),
+            transforms.ToTensor(),
+            transforms.Normalize(cifake_mean, cifake_std),
+        ])
+
+        if os.path.exists(os.path.join(cifake_root, 'train')) and os.path.exists(os.path.join(cifake_root, 'test')):
+            cifake_ds = [
+                datasets.ImageFolder(root=os.path.join(cifake_root, 'train'), transform=cifake_tf_train),
+                datasets.ImageFolder(root=os.path.join(cifake_root, 'test'), transform=cifake_tf_test)
+            ]
+            self.datasets['cifake'] = (cifake_ds, cifake_tf_train, cifake_tf_test)
+
+
     def get(self, name):
         """
         Retrieves a dataset configuration by name.

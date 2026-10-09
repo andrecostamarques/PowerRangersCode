@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 import SelectionMask as sm
 import torch
 import torch.nn as nn
@@ -123,9 +122,34 @@ class TrainingConfig:
         n_train = len(train_dataset) - n_val
         train_subset, val_subset = random_split(train_dataset, [n_train, n_val], generator=generator)
 
-        train_loader = DataLoader(train_subset, batch_size=self.batch_size, shuffle=True, generator=generator)
-        val_loader = DataLoader(val_subset, batch_size=self.batch_size, shuffle=False)
-        test_loader = DataLoader(test_dataset, batch_size=self.batch_size, shuffle=False)
+        use_cuda = torch.cuda.is_available()
+        num_workers = 8 if use_cuda else 2
+
+        train_loader = DataLoader(
+            train_subset, 
+            batch_size=self.batch_size, 
+            shuffle=True, 
+            generator=generator,
+            num_workers=num_workers,
+            pin_memory=use_cuda,
+            persistent_workers=(num_workers > 0)
+        )
+        val_loader = DataLoader(
+            val_subset, 
+            batch_size=self.batch_size, 
+            shuffle=False,
+            num_workers=num_workers,
+            pin_memory=use_cuda,
+            persistent_workers=(num_workers > 0)
+        )
+        test_loader = DataLoader(
+            test_dataset, 
+            batch_size=self.batch_size, 
+            shuffle=False,
+            num_workers=num_workers,
+            pin_memory=use_cuda,
+            persistent_workers=(num_workers > 0)
+        )
         
         dataset_name = self.datasets[0].__class__.__name__
         print(f"Dataloaders initialized for dataset: {dataset_name}")

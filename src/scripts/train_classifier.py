@@ -262,23 +262,30 @@ class ClassifierTrainer:
         print("Training finished.")
 
 
-def get_model_and_config(model_name):
+def get_num_classes(dataset_name):
+    name = dataset_name.lower()
+    if name == 'food101':
+        return 101
+    return 10
+
+
+def get_model_and_config(model_name, num_classes=10):
     if model_name == 'resnet20':
-        return resnet20(), nn.CrossEntropyLoss, 1e-4
+        return resnet20(num_classes=num_classes), nn.CrossEntropyLoss, 1e-4
     elif model_name == 'resnet34':
         model = resnet34(weights=None)
-        model.fc = nn.Linear(model.fc.in_features, 10)
+        model.fc = nn.Linear(model.fc.in_features, num_classes)
         return model, nn.CrossEntropyLoss, 1e-4
     elif model_name == 'lenet256':
-        return LeNet256(), nn.NLLLoss, 1e-3
+        return LeNet256(num_classes=num_classes), nn.NLLLoss, 1e-3
     elif model_name == 'simplecnnrgb':
-        return SimpleCNNRGB(), nn.NLLLoss, 1e-3
+        return SimpleCNNRGB(num_classes=num_classes), nn.NLLLoss, 1e-3
     else:
         raise ValueError(f"Unknown model name: {model_name}")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Train classifier models on Galaxy10 with optional fixed mask.")
+    parser = argparse.ArgumentParser(description="Train classifier models on datasets with optional fixed mask.")
     parser.add_argument(
         "--model", 
         type=str, 
@@ -305,6 +312,12 @@ def main():
         help="Custom training ID/name. If not provided, it will auto-generate one."
     )
     parser.add_argument(
+        "--dataset",
+        type=str,
+        default="galaxy10",
+        help="Specify dataset from DatasetDict (e.g. galaxy10, cifar10, food101). Default is galaxy10."
+    )
+    parser.add_argument(
         "--resume",
         action="store_true",
         help="Attempt to resume training from the latest valid checkpoint."
@@ -312,16 +325,20 @@ def main():
     args = parser.parse_args()
 
     db = DatasetDict()
-    ds_list, tf_train, tf_test = db.get("galaxy10")
+    ds_list, tf_train, tf_test = db.get(args.dataset)
 
-    model, loss_fn, lr = get_model_and_config(args.model)
+    num_classes = get_num_classes(args.dataset)
+    model, loss_fn, lr = get_model_and_config(args.model, num_classes=num_classes)
     
     # Auto-generate a descriptive training_id if none was provided
     if args.training_id is None:
         if args.mask_checkpoint is not None:
-            training_id = f"galaxy10_{args.model}_with_mask"
+            if "consensus" in args.mask_checkpoint.lower():
+                training_id = f"{args.dataset}_{args.model}_consensus_mask"
+            else:
+                training_id = f"{args.dataset}_{args.model}_with_mask"
         else:
-            training_id = f"galaxy10_{args.model}_normal"
+            training_id = f"{args.dataset}_{args.model}_normal"
     else:
         training_id = args.training_id
 
